@@ -428,8 +428,21 @@ void main() {
 }
 """
 
+codigo_fuente2 = """
+int suma(int a , int b){
+    int c = a + b ;
+    return c;
+    
+}
+
+void main() {
+    int valor = 5;
+    int resultado = condicional(valor);
+}
+"""
+
 # Analisis lexico
-tokens = identificar_tokens(codigo_fuente)
+tokens = identificar_tokens(codigo_fuente2)
 print("Tokens encontrados:")
 for tipo, valor in tokens:
     print(f'{tipo}: {valor}')
@@ -506,3 +519,125 @@ print(json.dumps(imprimir_ast(arbol_ast), indent=1))
 
 codigo_asm = arbol_ast.generar_codigo()
 print(codigo_asm)
+
+
+#-------------------------Análisis Semántico-------------------------
+#Nos sirve para ver qu el codigo tenga sentido logico
+
+class AnalizadorSemantico:
+    def __init__(self):
+        self.tabla_simbolos = {}
+    
+    def analizar(self,nodo):
+        if isinstance(nodo,NodoAsignacion): 
+            tipo_expr = self.analizar(nodo.expresion)
+            self.tabla_simbolos.declarar_variable(nodo.nombre, tipo_expr)
+
+        elif isinstance(nodo, NodoIdentificador):
+            return self.tabla_simbolos.obtener_tipo_variable(nodo.nombre)        
+        
+        elif isinstance(nodo, NodoNumero):
+            return "int"
+        
+        elif isinstance(nodo, NodoOperacion):
+            tipo_izq = self.analizar(nodo.izquierda)
+            tipo_der = self.analizar(nodo.derecha)
+            if tipo_izq != tipo_der:
+                raise Exception(f"Error : Tipos incompatibles en operación '{tipo_izq} {nodo.operador} {tipo_der} '")
+            return tipo_izq #Retorna el tipo resultante
+        
+        elif isinstance(nodo, NodoFuncion):
+            self.tabla_simbolos.declarar_funcion(nodo.nombre, nodo.tipo_retorno, nodo.parametros)
+            for instruccion in nodo.cuerpo:
+                self.analizar(instruccion)
+        
+        elif isinstance(nodo, NodoLlamadaFuncion):
+            tipo_retorno, parametros = self.tabla_simbolos.obtener_info_funcion(nodo.nombre)
+            if len(nodo.argumentos) != len(parametros):
+                raise Exception(f"Error: La función '{nodo.nombre}' espera {len(parametros)} argumentos, pero recibió {len(nodo.argumentos)}")
+            return tipo_retorno
+        
+        elif isinstance(nodo, NodoPrograma):
+            for funcion in nodo.funciones:
+                self.analizar(funcion)
+            self.analizar(nodo.main)
+
+
+
+        metodo = f'visitar_{type(nodo).__name__}'
+        if hasattr(self,metodo):
+            method =  getattr(self,metodo)(nodo)
+            return method
+        else:
+            raise Exception(f'No se ha implementado el análisis semántico para {type(nodo).__name__}')
+
+    def visitar_NodoFuncion(self, nodo):
+        if nodo.nombre[1] in self.tabla_simbolos:
+            raise Exception(f'Error semántico: la función {nodo.nombre[1]} ya está definida')
+
+        self.tabla_simbolos[nodo.nombre[1]] = {'tipo': nodo.parametros[0].tipo[1],'parametros': nodo.parametros}
+
+        for param in nodo.parametros:
+            self.tabla_simbolos[param.nombre[1]] = {'tipo':param.tipo[1]}
+        
+        for instruccion in nodo.cuerpo:
+            self.analizar(instruccion)
+    
+    def visitar_NodoAsignacion(self, nodo):
+        tipo_expresion = self.analizar(nodo.expresion)
+        self.tabla_simbolos[nodo.nombre[1]] = {'tipo': tipo_expresion}
+    
+    def visitar_NodoOperacion(self, nodo):
+        tipo_izquierda = self.analizar(nodo.izquierda)
+        tipo_derecha = self.analizar(nodo.derecha)
+        
+        if tipo_izquierda != tipo_derecha:
+            raise Exception(f'Error semántico: tipos de operandos incompatibles ({tipo_izquierda} vs {tipo_derecha})')
+        return tipo_izquierda
+    
+    def visitar_NodoNumero(self,nodo):
+        return 'int' if '.' not in nodo.valor[1] else 'float'
+    
+    def visitar_NodoIdentificador(self,nodo):
+        if nodo.nombre[1] not in self.tabla_simbolos:
+            raise Exception(f'Error semántico: la variable {nodo.nombre[1]} no está definida')
+        return self.tabla_simbolos[nodo.nombre[1]]['tipo']
+    
+    def visitar_NodoRetorno(self,nodo):
+        return self.analizar(nodo.expresion)
+    
+
+analizador_semantico=AnalizadorSemantico()
+analisis = analizador_semantico.analizar(arbol_ast)
+print(analizador_semantico.tabla_simbolos)
+
+for llave in (analizador_semantico.tabla_simbolos.keys()):
+    valor = analizador_semantico.tabla_simbolos.get(llave)
+    print(f'{llave}:{valor}')
+
+class TablaSimbolos:
+    def __init__(self):
+        self.variables = {}
+        self.funciones = {}
+    
+    def declarar_variable(self,nombre,tipo):
+        if nombre in self.variables:
+            raise Exception(f"Error: Variable '{nombre}' ya declarada")
+        self.variables[nombre] = tipo
+    
+    def obtener_tipo_variable (self,nombre):
+        if nombre not in self.variables:
+            raise Exception(f"Error: Variable '{nombre}' no declarada")
+        return self.variables[nombre]
+    
+    def declarar_funcion(self, nombre, tipo_retorno,parametros):
+        if nombre in self.funciones:
+            raise Exception(f"Error: Fucnión '{nombre}' ya declarada")
+        self.funciones[nombre] = (tipo_retorno, parametros)
+    
+    def obtener_info_funcion(self,nombre):
+        if nombre not in self.funciones:
+            raise Exception(f"Error: Función '{nombre}' no declarada")
+        return self.funciones[nombre]
+
+
